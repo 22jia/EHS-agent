@@ -1,0 +1,75 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtemp, copyFile, cp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+
+test('generation reads stored law, verifies quotes and excludes public authority duties', async () => {
+  let received, calls=0, invalidOnce=false, citationMode=false;
+  const content='第十三条 乡镇人民政府、街道办事处应当根据需要建设消防站。\n第十九条 任何单位和个人不得占用、堵塞、封闭消防车通道。\n第二十条 生产经营单位不得从事下列行为：\n（一）关闭直接关系生产安全的防护设施。\n第五十一条 生产经营单位进行爆破、吊装、动火、临时用电以及国家规定的其他危险作业的，应当严格执行内部审批程序。';
+  const item={text:'检查厂区出入口是否被停放的车辆堵塞',method:'到厂区出入口观察消防车通道有无车辆占用',criteria:'消防车通道没有被车辆占用、堵塞或封闭；确认堵塞为不合格',evidence:'出入口编号、检查时间和现场照片',risk:'中',source:'第十九条',sourceQuote:'任何单位和个人不得占用、堵塞、封闭消防车通道。',obligationSubject:'任何单位和个人',applicability:'直接适用',applicabilityReason:'汽车制造企业也是单位，厂区出入口不得堵塞消防车通道',applicabilityConditions:'本企业厂区消防车通道',priority:'重点核查',priorityReason:'通道堵塞影响救援到达；当前占用及人员暴露信息不足，初步排序待现场确认',basisType:'落实核查',basisExplanation:'将任何单位不得堵塞消防车通道的义务落实到厂区车辆停放核查',remediation:'发现堵塞时清除占用并恢复通行',verification:'回到原占用位置确认车辆移走且通道恢复',result:'符合'};
+  const model=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;received=JSON.parse(raw);calls++;if(citationMode){const prompt=JSON.parse(received.messages[1].content);const passage=prompt.citationCandidates.find(c=>c.source==='第二十条')?.passages[0] || {citationId:'L3P1'};res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({items:[{...item,citationId:passage.citationId,criteria:'旁路应有审批和记录',obligationSubject:'生产经营单位'},{...item,citationId:passage.citationId,source:'错误条号',sourceQuote:'模型抄错的原文',text:'核对既有防护设施关闭状态',obligationSubject:'生产经营单位'},{...item,citationId:'UNKNOWN'}]})}}]}));return;}if(invalidOnce){invalidOnce=false;res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({items:[{...item,applicability:'厂区通道适用'}]})}}]}));return;}res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({items:[item,{...item,text:'检查乡镇消防站建设',source:'第十三条',sourceQuote:'乡镇人民政府、街道办事处应当根据需要建设消防站。',obligationSubject:'乡镇人民政府、街道办事处'},{...item,source:'第十九条',sourceQuote:'不存在的法规原文'},{...item,source:'第十三条'},{...item,text:'检查乡镇消防站建设',source:'第十三条',sourceQuote:'乡镇人民政府、街道办事处应当根据需要建设消防站。'},{...item,priorityReason:''},{...item,basisType:'补充建议'},{...item,text:'冲压设备光电防护是否被旁路',source:'第五十一条',sourceQuote:'生产经营单位进行爆破、吊装、动火、临时用电以及国家规定的其他危险作业的，应当严格执行内部审批程序。',obligationSubject:'生产经营单位'},{...item,text:'核对既有防护设施关闭状态',source:'第二十条',sourceQuote:'（一）关闭直接关系生产安全的防护设施。',subjectQuote:'生产经营单位不得从事下列行为：',obligationSubject:'生产经营单位'}],contextSummary:'仅确认汽车制造，未提供具体工艺',requiredInformation:['厂区通道布置'],uncoveredObligations:['其他适用条款待后续覆盖']})}}]}));});
+  await new Promise(resolve=>model.listen(0,'127.0.0.1',resolve));
+  const dir=await mkdtemp(join(tmpdir(),'ehs-grounding-'));const port=32000+Math.floor(Math.random()*5000);
+  await copyFile(new URL('../server.js',import.meta.url),join(dir,'server.mjs'));
+  await cp(new URL('../skills/ehs-law-to-checks/',import.meta.url),join(dir,'skills','ehs-law-to-checks'),{recursive:true});
+  const child=spawn(process.execPath,[join(dir,'server.mjs')],{env:{...process.env,PORT:String(port),EHS_MODEL_API_KEY:'test-only',EHS_MODEL_API_BASE_URL:`http://127.0.0.1:${model.address().port}`,EHS_MODEL_NAME:'stub'},stdio:['ignore','pipe','pipe']});
+  const request=async(path,input)=>{const res=await fetch(`http://localhost:${port}${path}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)});return {status:res.status,data:await res.json()};};
+  try{
+    await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);});
+    await request('/api/regulations',{id:'LAW-TEST',name:'公共消防设施管理办法',content,scope:'辽宁省',effectiveDate:'2099-12-01'});
+    const result=await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST',name:'伪造名称',content:'伪造正文'},industry:'汽车制造',region:'辽宁省',context:'汽车制造厂，日常运营'});
+    assert.equal(result.status,200);assert.equal(result.data.items.length,2);
+    const prompt=JSON.parse(received.messages[1].content);
+    assert.equal(prompt.law.content,content);assert.equal(prompt.law.name,'公共消防设施管理办法');
+    assert.equal(prompt.industry,'汽车制造');assert.equal(prompt.region,'辽宁省');
+    assert.ok(received.messages[0].content.includes('这条法规对应企业哪里可能出事'));
+    assert.ok(received.messages[0].content.includes('转换示例'));
+    assert.equal(result.data.skill.name,'ehs-law-to-checks');
+    for(const key of ['priority','priorityReason','basisType','basisExplanation','applicabilityConditions','remediation','verification'])assert.equal(result.data.items[0][key],item[key]);
+    assert.equal(result.data.items[0].result,'待检查');
+    assert.equal(result.data.items[1].subjectQuote,'生产经营单位不得从事下列行为：');
+    await request('/api/templates',{id:'SKILL-TEMPLATE',name:'技能模板',items:result.data.items});
+    const savedTemplates=await (await fetch(`http://localhost:${port}/api/templates`)).json();
+    const savedItem=savedTemplates.find(t=>t.id==='SKILL-TEMPLATE').items[0];
+    assert.equal(savedItem.priorityReason,item.priorityReason);assert.equal(savedItem.verification,item.verification);
+    await request('/api/checks',{id:'SKILL-CHECK',title:'技能检查',checkItems:[savedItem]});
+    const savedChecks=await (await fetch(`http://localhost:${port}/api/checks`)).json();
+    assert.equal(savedChecks.find(c=>c.id==='SKILL-CHECK').checkItems[0].remediation,item.remediation);
+
+    assert.deepEqual(result.data.requiredInformation,['厂区通道布置']);
+    assert.deepEqual(result.data.uncoveredObligations,['其他适用条款待后续覆盖']);
+    assert.equal(result.data.items[0].sourceQuote,item.sourceQuote);
+    assert.equal(result.data.source.id,'LAW-TEST');assert.equal(result.data.source.contentLength,content.length);
+    assert.ok(result.data.warnings.some(w=>w.includes('尚未施行')));
+    assert.ok(result.data.warnings.some(w=>w.includes('7')));
+    assert.equal((await request('/api/agent/generate-check-items',{law:{id:'MISSING',name:'未入库',content},industry:'汽车制造',region:'辽宁省'})).status,400);
+    await request('/api/regulations',{id:'EMPTY',name:'仅附件',fileName:'正文.pdf'});
+    assert.equal((await request('/api/agent/generate-check-items',{law:{id:'EMPTY'},industry:'汽车制造',region:'辽宁省'})).status,400);
+    assert.equal((await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST'},industry:'汽车制造',region:'浙江省'})).status,400);
+    assert.equal(calls,1);
+    invalidOnce=true;
+    const repaired=await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST'},industry:'汽车制造',region:'辽宁省'});
+    assert.equal(repaired.status,200);assert.equal(repaired.data.items.length,2);assert.equal(calls,3);
+    assert.match(received.messages.at(-1).content,/后端校验/);
+    citationMode=true;
+    const food=await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST'},industry:'食品',region:'辽宁省',context:''});
+    assert.equal(food.status,200);assert.equal(food.data.items.length,1);
+    const foodPrompt=JSON.parse(received.messages[1].content);
+    assert.equal(foodPrompt.industry,'食品');
+    assert.ok(foodPrompt.citationCandidates.some(c=>c.source==='第二十条'));
+    assert.ok(foodPrompt.citationCandidates.some(c=>c.source==='第十九条'));
+
+    const bound=await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST'},industry:'汽车制造',region:'辽宁省',context:'确认有防护设施，检查是否关闭'});
+    assert.equal(bound.status,200);assert.equal(bound.data.items.length,1);
+    assert.equal(bound.data.items[0].source,'第二十条');
+    assert.equal(bound.data.items[0].sourceQuote,'生产经营单位不得从事下列行为：\n（一）关闭直接关系生产安全的防护设施。');
+    assert.equal(bound.data.items[0].citationId,'L3P1');
+    assert.match(bound.data.rejectedItems[0].reason,/旁路审批/);assert.match(bound.data.rejectedItems[1].reason,/citationId/);assert.equal(calls,5);
+    await rm(join(dir,'skills'),{recursive:true});
+    const missing=await request('/api/agent/generate-check-items',{law:{id:'LAW-TEST'},industry:'汽车制造',region:'辽宁省'});
+    assert.equal(missing.status,502);assert.match(missing.data.error,/Skill|技能/);assert.equal(calls,5);
+  }finally{child.kill();await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));await new Promise(resolve=>model.close(resolve));await rm(dir,{recursive:true,force:true});}
+});

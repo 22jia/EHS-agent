@@ -147,3 +147,11 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# EHS runtime configuration and research artifacts
+.env
+.env.*
+!.env.example
+.openai/research/
+.openai/*.png
+!/dist/
