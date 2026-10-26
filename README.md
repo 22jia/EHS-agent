@@ -2,123 +2,123 @@
 
 # EHS Agent
 
-[English](README.en.md) · **中文**
+**English** · [中文](README.zh-CN.md)
 
-### EHS Loop · 制造业现场检查与整改闭环
+### EHS Loop · Manufacturing inspections, remediation, and verification
 
-**从法规原文，到可审核的检查项，再到整改复查。**
+**From regulation text to reviewable check items—and through to follow-up verification.**
 
-[产品案例](docs/case-study.md) · [能力与边界](#当前边界) · [演示路径](#演示从这个任务开始)
+[Product case study (中文)](docs/case-study.md) · [Current boundaries](#current-boundaries) · [Demo task](#start-with-this-demo-task)
 
 </div>
 
-![EHS Agent 产品闭环示意，非运行截图](docs/assets/cover.svg)
+![EHS Agent workflow illustration, not an application screenshot](docs/assets/cover.svg)
 
-> 本仓库当前提供产品案例文档。下述实现说明来自本地 EHS Loop 原型；应用源码与可运行发布包尚未在本仓库提供。
+> This repository currently contains product case documentation. Implementation descriptions below refer to the local EHS Loop prototype; application source code and a runnable release are not yet provided here.
 
-## 它能帮 EHS 人员做什么
+## What it helps EHS practitioners do
 
-“下周要检查车间，我需要把法规要求整理成现场能执行、出了问题能继续跟踪的清单。”
+“I have a workshop inspection next week. I need to turn regulations into a checklist people can execute on site, with a way to follow up on findings.”
 
-EHS Loop 把法规、检查模板、现场检查、问题登记和整改复查接在同一条工作流中。AI 助手负责提出检查项草稿，保留原文引用、适用条件、证据要求与复查要点；人员审核之后，再进入实际检查。
+EHS Loop connects regulations, templates, field inspections, issue records, remediation, and verification. The AI assistant proposes check-item drafts with source quotations, applicability conditions, evidence requirements, and verification points. People review the drafts before using them in inspections.
 
-| 人员要做的事 | 本地原型提供的帮助 |
+| Practitioner task | What the local prototype offers |
 | --- | --- |
-| 把法规整理成检查清单 | 结合所选法规、行业、地区和企业补充说明生成草稿 |
-| 核查检查项的依据 | 通过段落编号绑定库内条号和连续原文，校验引用 |
-| 识别条件和信息缺口 | 展示适用条件、待补充信息和未覆盖义务 |
-| 带着清单去检查 | 审核模板、创建检查任务、记录检查结果 |
-| 跟踪发现的问题 | 衔接问题登记、整改跟踪与复查销项 |
+| Turn regulations into a checklist | Draft items using the selected regulation, industry, region, and company context |
+| Check each item's basis | Bind stored article numbers and verbatim passages through paragraph IDs; validate references |
+| Identify conditions and missing context | Display applicability conditions, required information, and uncovered obligations |
+| Carry a checklist into an inspection | Review templates, create tasks, and record inspection results |
+| Follow through on findings | Connect issue records to remediation and verification |
 
 ```mermaid
 flowchart LR
-    A[法规与企业场景] --> B[Skill 生成检查项草稿]
-    B --> C[字段与引用校验]
-    C --> D[人工审核模板]
-    D --> E[现场检查]
-    E --> F[问题与整改]
-    F --> G[复查销项]
+    A[Regulation and company context] --> B[Skill drafts check items]
+    B --> C[Field and citation validation]
+    C --> D[Human template review]
+    D --> E[Field inspection]
+    E --> F[Issues and remediation]
+    F --> G[Verification and closure]
 ```
 
-## 五个让检查有依据、整改有下文的设计
+## Five decisions that connect evidence to action
 
-### 01　先说明检查场景，再生成清单
+### 01 Describe the inspection context before generating items
 
-相同条文，对不同工艺和作业条件的意义可能不同。输入包含行业、地区和企业/工艺补充说明；模型返回场景摘要、所需补充信息与尚未覆盖的义务。
+The same provision can have different implications for different processes and working conditions. Inputs include industry, region, and company/process notes. The model returns a context summary, additional information needed, and obligations not yet covered.
 
-设计重点是把信息不足显式保留，避免将一份通用清单误认为企业全部义务已被覆盖。
+The design keeps missing information visible so a generic checklist is not mistaken for complete coverage of a company's obligations.
 
-### 02　法规转检查项是一套可维护的 Skill
+### 02 Maintain regulation-to-check generation as a Skill
 
-后端每次生成时读取运行目录中的 Skill 与示例。规则覆盖检查对象、方法、判定标准、证据、适用条件、依据关系、整改方向和复查要点。
+Each generation reads the deployed Skill and examples. Its rules cover inspection objects, methods, criteria, evidence, applicability, the relationship to a source provision, remediation, and verification.
 
-| 草稿字段 | 帮助审核者判断什么 |
+| Draft fields | What reviewers can assess |
 | --- | --- |
-| 检查对象、方法、标准 | 能否转成现场可执行的动作 |
-| 条文、原文与义务主体 | 是否有真实依据、是否针对正确对象 |
-| 适用条件与理由 | 是否适用于当前工艺和区域 |
-| 优先级与理由 | 为什么先核查这一项 |
-| 证据、整改与复查 | 问题发现后如何继续推进 |
+| Inspection object, method, and criteria | Whether an item translates into an executable field action |
+| Provision, quotation, and obligated party | Whether the basis is genuine and addresses the right party |
+| Applicability conditions and reasoning | Whether it fits the current process and area |
+| Priority and rationale | Why this item should be checked first |
+| Evidence, remediation, and verification | How work continues after a finding |
 
-运行规则文件缺失或为空会明确报错，避免悄悄使用过期提示词。
+Missing or empty runtime rule files produce an explicit error, preventing silent fallback to an outdated prompt.
 
-### 03　让后端绑定原文，减少模型抄写错误
+### 03 Bind quotations in the backend
 
-库内法规条文拆成带 `citationId` 的段落，模型选择段落，后端绑定原文与条号。系统校验字段和引用；不满足约定的条目被排除，并给出提示。结果全部被排除时，按现有逻辑纠正重试一次。
+Stored regulation text is divided into passages with a `citationId`. The model selects passages; the backend binds their original wording and article numbers. Field and reference validation excludes nonconforming items and returns notices. If all items are excluded, the current logic makes one corrective retry.
 
-**引用文本准确**与**适用性判断正确**是两个问题：原文绑定可以降低错引和拼接风险，专业人员仍需审核条文与检查项之间是否存在有效依据关系。
+**Quotation accuracy** and **correct applicability** are separate concerns. Binding original text reduces misquotation and splicing; qualified reviewers still need to assess whether a provision actually supports a proposed check.
 
-### 04　“待核验”保留为独立状态
+### 04 Keep “pending verification” as a distinct state
 
-资料不足时，需要补查，不能默认完成。本地原型将“待核验”与已完成检查区分，保存模板、创建检查任务时保留新增的依据和上下文字段。
+Missing information calls for further checking. It must not count as completed work. The local prototype distinguishes pending verification from completed inspections and carries the new evidence and context fields into saved templates and tasks.
 
-检查优先级也与风险字段分开，避免把“应先核查”误读为已确定事故风险等级。
+Inspection priority is also separate from the risk field, so “check this first” is not confused with an established incident risk classification.
 
-### 05　检查结果要继续进入整改与复查
+### 05 Carry inspection findings into remediation and verification
 
-工作流覆盖企业工作台、新建检查、现场检查、风险登记、整改跟踪与复查销项。核心产品问题是：**检查发现能否带着上下文进入下一位处理者的工作。**
+The journey covers the company workspace, new inspections, field tasks, risk records, remediation tracking, and closure after verification. The core product question is: **Can a finding reach the next person with its context intact?**
 
-![EHS Loop 本地演示工作台](docs/assets/workbench.png)
+![EHS Loop local demo workspace](docs/assets/workbench.png)
 
-*本地原型实际界面。图中的工厂、人员、完成率、风险数量和变化幅度均为演示数据，不代表真实企业或已验证效果。*
+*Actual local prototype interface. Factories, people, completion rates, risk counts, and changes shown are demo data—not real-company results or measured impact.*
 
-当前服务端使用 JSON 文件持久化，预留后续替换数据库的接口边界；组织权限、正式审计与生产部署仍需补齐。
+The current backend persists data in JSON files, with interfaces intended to support a future database adapter. Organizational permissions, formal auditing, and production deployment still need work.
 
-## 演示从这个任务开始
+## Start with this demo task
 
-> 为制造业车间准备一次检查。选择库内法规，填写本次工艺、区域及已知作业条件；生成草稿后，逐条核对原文、适用条件和资料缺口，再审核需要带到现场的项目。
+> Prepare an inspection for a manufacturing workshop. Select a stored regulation and describe the process, area, and known working conditions. Generate drafts, check quotations, applicability, and missing information, then review the items to take on site.
 
-| 步骤 | 应观察的结果 |
+| Step | What to observe |
 | --- | --- |
-| 生成草稿 | 对象、方法、标准、证据和依据字段可见 |
-| 核查引用 | 条号与原文能回到当前所选库内文本 |
-| 缺少条件 | 展示需补资料，保留待核验状态 |
-| 现场发现问题 | 可继续记录整改与复查信息 |
+| Generate drafts | Objects, methods, criteria, evidence, and source fields are visible |
+| Check references | Article numbers and quotations map back to the selected stored text |
+| Encounter missing conditions | Required information is shown and pending verification remains available |
+| Identify a field issue | Remediation and verification records can follow |
 
-这是流程演示任务，未提供真实企业审计结果。具体取舍与评估计划见[产品案例](docs/case-study.md)。
+This is a workflow demonstration, not a real-company audit result. The [product case study (中文)](docs/case-study.md) explains decisions and evaluation plans.
 
-## Agent 如何支撑这些体验
+## How the agent supports the experience
 
-| 模块 | 当前本地实现 |
+| Module | Current local implementation |
 | --- | --- |
-| 生成输入 | 所选法规全文、库内版本、行业、地区与企业说明 |
-| 运行规则 | 文件化 Skill 与示例，在每次生成时读取 |
-| 模型服务 | 后端调用可配置模型接口 |
-| 输出控制 | 字段约束、引用校验、排除提示与纠正重试 |
-| 业务流程 | 模板、检查、问题、整改与复查 |
-| 持久化 | JSON 开发适配器 |
+| Generation inputs | Full selected regulation, stored version, industry, region, and company notes |
+| Runtime rules | File-based Skill and examples read for each generation |
+| Model service | Configurable model API called by the backend |
+| Output controls | Field constraints, reference validation, exclusion notices, and corrective retry |
+| Business workflow | Templates, inspections, issues, remediation, and verification |
+| Persistence | JSON development adapter |
 
-## 文档与体验状态
+## Documentation and availability
 
-| 入口 | 内容 |
+| Entry | Contents |
 | --- | --- |
-| [产品案例](docs/case-study.md) | 核心问题、设计取舍、演示任务与评估计划 |
-| 当前 README | 本地原型已具备的能力与公开展示边界 |
+| [Product case study (中文)](docs/case-study.md) | Problem, decisions, demo task, and evaluation plans |
+| This README | Local prototype capabilities and the public documentation scope |
 
-本仓库暂不提供克隆即运行的启动指令。后续公开应用源码时，需一并提供运行规则、示例配置、演示数据与验证说明。
+There are no clone-and-run instructions for this repository yet. A future source release should include runtime rules, example configuration, demo data, and validation instructions.
 
-## 当前边界
+## Current boundaries
 
-该产品处于原型阶段。法规版本和适用性需要人工核实；当前不会自动检索企业资料库或外部技术标准。引用校验与 Skill 接入不等于完成专业合规审核。本文不提供具体法规解释或企业合规结论。
+This is a prototype. Regulation versions and applicability require human verification. It does not automatically search company knowledge bases or external technical standards. Citation checks and Skill integration do not constitute professional compliance review. This document provides neither specific legal interpretations nor company compliance conclusions.
 
-生产使用前仍需认证、组织隔离、对象存储、审计记录与可靠备份。尚无真实企业试点、事故下降或检查效率提升的实测数据。
+Production use still requires authentication, organization isolation, object storage, audit records, and reliable backups. No measured real-company pilots, incident reductions, or inspection efficiency gains are reported.
