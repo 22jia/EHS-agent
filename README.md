@@ -2,6 +2,8 @@
 
 # EHS Agent
 
+[English](README.en.md) · **中文**
+
 ### EHS Loop · 制造业现场检查与整改闭环
 
 **从法规原文，到可审核的检查项，再到整改复查。**
